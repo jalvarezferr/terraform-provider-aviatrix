@@ -3,6 +3,7 @@ package aviatrix
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/AviatrixSystems/go-aviatrix/goaviatrix"
 	"github.com/hashicorp/terraform/helper/schema"
@@ -14,6 +15,9 @@ func resourceAviatrixGateway() *schema.Resource {
 		Read:   resourceAviatrixGatewayRead,
 		Update: resourceAviatrixGatewayUpdate,
 		Delete: resourceAviatrixGatewayDelete,
+		Importer: &schema.ResourceImporter{
+			State: resourceAviatrixGatewayImportState,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"cloud_type": {
@@ -183,6 +187,82 @@ func resourceAviatrixGateway() *schema.Resource {
 			},
 		},
 	}
+}
+
+func resourceAviatrixGatewayImportState(
+	d *schema.ResourceData,
+	meta interface{}) ([]*schema.ResourceData, error) {
+	
+	client := meta.(*goaviatrix.Client)
+	result := resourceAviatrixGateway()
+	r := result.Data(nil)
+
+    substr := strings.Split(d.Id(),"@")
+    account_name := substr[1]
+    gateway_name := substr[0]	
+	
+	r.SetId (gateway_name)
+	
+	gateway := &goaviatrix.Gateway{
+		GwName:      gateway_name,
+		AccountName: account_name,
+	}
+	gw, err := client.GetGateway(gateway)
+	if err != nil {
+		if err == goaviatrix.ErrNotFound {
+			return nil,fmt.Errorf("Gateway %s not found", gateway.GwName)
+		}
+		return nil,fmt.Errorf("Couldn't get Aviatrix Gateway data for import: %s", err)
+	}
+	
+	r.Set("cloud_type",gw.CloudType)
+	r.Set("account_name",gw.AccountName)
+	r.Set("gw_name",gw.GwName)
+	r.Set("vpc_id",strings.Split(gw.VpcID,"~~")[0])
+	r.Set("vpc_reg",gw.VpcRegion)
+	if gw.VpcNet != "" { r.Set("vpc_net",gw.VpcNet) }
+	if gw.EnableNat != ""  { r.Set("enable_nat",gw.EnableNat) }
+	if gw.DnsServer != "" { r.Set("dns_server",gw.DnsServer) }
+	if gw.VpnStatus != "" { r.Set("vpn_access",gw.VpnStatus) }
+	if gw.VpnCidr != "" { r.Set("cidr",gw.VpnCidr) }
+	if gw.ElbState == "enabled" {
+	    r.Set("enable_elb","yes")
+	} else {
+	    r.Set("enable_elb","no")
+	}
+	if gw.SplitTunnel != "" { r.Set("split_tunnel",gw.SplitTunnel) }
+	if gw.OtpMode != "" { r.Set("otp_mode",gw.OtpMode) }
+	if gw.SamlEnabled != "" { r.Set("saml_enabled",gw.SamlEnabled) }
+	if gw.OktaToken != "" { r.Set("okta_token",gw.OktaToken) }
+	if gw.OktaURL != "" { r.Set("okta_url",gw.OktaURL) }
+	if gw.OktaUsernameSuffix != "" { r.Set("okta_username_suffix",gw.OktaUsernameSuffix) }
+	if gw.DuoIntegrationKey != "" { r.Set("duo_integration_key",gw.DuoIntegrationKey) }
+	if gw.DuoSecretKey != "" { r.Set("duo_secret_key",gw.DuoSecretKey) }
+	if gw.DuoAPIHostname != "" { r.Set("duo_api_hostname",gw.DuoAPIHostname) }
+	if gw.DuoPushMode != "" { r.Set("duo_push_mode",gw.DuoPushMode) }
+	if gw.EnableLdap != "" { r.Set("enable_ldap",gw.EnableLdap) }
+	if gw.LdapServer != "" { r.Set("ldap_server",gw.LdapServer) }
+	if gw.LdapBindDn!= "" { r.Set("ldap_bind_dn",gw.LdapBindDn) }
+	if gw.LdapPassword != "" { r.Set("ldap_password",gw.LdapPassword) }
+	if gw.LdapBaseDn != "" { r.Set("ldap_base_dn",gw.LdapBaseDn) }
+	if gw.LdapUserAttr != "" { r.Set("ldap_username_attribute",gw.LdapUserAttr) }
+	if gw.HASubnet != "" { r.Set("ha_subnet",gw.HASubnet) }
+	if gw.PeeringHASubnet != "" { r.Set("public_subnet",gw.PeeringHASubnet) }
+	if gw.NewZone != "" { r.Set("zone",gw.NewZone) }
+	if gw.SingleAZ != "" { r.Set("single_az_ha",gw.SingleAZ) }
+//	r.Set("allocate_new_eip",gw.AllocateNewEip)
+	if gw.Eip != "" { r.Set("eip",gw.Eip) }
+	r.Set("public_ip",gw.PublicIP)
+	
+	r.SetType("aviatrix_gateway")
+	
+	err = resourceAviatrixGatewayRead(r,meta)
+	if err != nil {
+	    return nil,fmt.Errorf("[ERROR] Could not import gateway resource: %s",err)
+    }
+	results := make([]*schema.ResourceData, 1,1)
+	results[0] = r
+    return results, nil
 }
 
 func resourceAviatrixGatewayCreate(d *schema.ResourceData, meta interface{}) error {
