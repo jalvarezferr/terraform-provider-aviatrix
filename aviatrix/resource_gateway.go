@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/AviatrixSystems/go-aviatrix/goaviatrix"
 	"github.com/hashicorp/terraform/helper/schema"
@@ -18,11 +17,6 @@ func resourceAviatrixGateway() *schema.Resource {
 		Delete: resourceAviatrixGatewayDelete,
 		Importer: &schema.ResourceImporter{
 			State: schema.ImportStatePassthrough,
-		},
-		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(15 * time.Minute),
-			Update: schema.DefaultTimeout(15 * time.Minute),
-			Delete: schema.DefaultTimeout(25 * time.Minute),
 		},
 
 		Schema: map[string]*schema.Schema{
