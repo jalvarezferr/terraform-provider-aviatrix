@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/AviatrixSystems/go-aviatrix/goaviatrix"
 	"github.com/hashicorp/terraform/helper/schema"
@@ -16,7 +17,12 @@ func resourceAviatrixGateway() *schema.Resource {
 		Update: resourceAviatrixGatewayUpdate,
 		Delete: resourceAviatrixGatewayDelete,
 		Importer: &schema.ResourceImporter{
-			State: resourceAviatrixGatewayImportState,
+			State: schema.ImportStatePassthrough,
+		},
+		Timeouts: &schema.ResourceTimeout{
+			Create: schema.DefaultTimeout(15 * time.Minute),
+			Update: schema.DefaultTimeout(15 * time.Minute),
+			Delete: schema.DefaultTimeout(25 * time.Minute),
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -189,82 +195,6 @@ func resourceAviatrixGateway() *schema.Resource {
 	}
 }
 
-func resourceAviatrixGatewayImportState(
-	d *schema.ResourceData,
-	meta interface{}) ([]*schema.ResourceData, error) {
-	
-	client := meta.(*goaviatrix.Client)
-	result := resourceAviatrixGateway()
-	r := result.Data(nil)
-
-    substr := strings.Split(d.Id(),"@")
-    account_name := substr[1]
-    gateway_name := substr[0]	
-	
-	r.SetId (gateway_name)
-	
-	gateway := &goaviatrix.Gateway{
-		GwName:      gateway_name,
-		AccountName: account_name,
-	}
-	gw, err := client.GetGateway(gateway)
-	if err != nil {
-		if err == goaviatrix.ErrNotFound {
-			return nil,fmt.Errorf("Gateway %s not found", gateway.GwName)
-		}
-		return nil,fmt.Errorf("Couldn't get Aviatrix Gateway data for import: %s", err)
-	}
-	
-	r.Set("cloud_type",gw.CloudType)
-	r.Set("account_name",gw.AccountName)
-	r.Set("gw_name",gw.GwName)
-	r.Set("vpc_id",strings.Split(gw.VpcID,"~~")[0])
-	r.Set("vpc_reg",gw.VpcRegion)
-	if gw.VpcNet != "" { r.Set("vpc_net",gw.VpcNet) }
-	if gw.EnableNat != ""  { r.Set("enable_nat",gw.EnableNat) }
-	if gw.DnsServer != "" { r.Set("dns_server",gw.DnsServer) }
-	if gw.VpnStatus != "" { r.Set("vpn_access",gw.VpnStatus) }
-	if gw.VpnCidr != "" { r.Set("cidr",gw.VpnCidr) }
-	if gw.ElbState == "enabled" {
-	    r.Set("enable_elb","yes")
-	} else {
-	    r.Set("enable_elb","no")
-	}
-	if gw.SplitTunnel != "" { r.Set("split_tunnel",gw.SplitTunnel) }
-	if gw.OtpMode != "" { r.Set("otp_mode",gw.OtpMode) }
-	if gw.SamlEnabled != "" { r.Set("saml_enabled",gw.SamlEnabled) }
-	if gw.OktaToken != "" { r.Set("okta_token",gw.OktaToken) }
-	if gw.OktaURL != "" { r.Set("okta_url",gw.OktaURL) }
-	if gw.OktaUsernameSuffix != "" { r.Set("okta_username_suffix",gw.OktaUsernameSuffix) }
-	if gw.DuoIntegrationKey != "" { r.Set("duo_integration_key",gw.DuoIntegrationKey) }
-	if gw.DuoSecretKey != "" { r.Set("duo_secret_key",gw.DuoSecretKey) }
-	if gw.DuoAPIHostname != "" { r.Set("duo_api_hostname",gw.DuoAPIHostname) }
-	if gw.DuoPushMode != "" { r.Set("duo_push_mode",gw.DuoPushMode) }
-	if gw.EnableLdap != "" { r.Set("enable_ldap",gw.EnableLdap) }
-	if gw.LdapServer != "" { r.Set("ldap_server",gw.LdapServer) }
-	if gw.LdapBindDn!= "" { r.Set("ldap_bind_dn",gw.LdapBindDn) }
-	if gw.LdapPassword != "" { r.Set("ldap_password",gw.LdapPassword) }
-	if gw.LdapBaseDn != "" { r.Set("ldap_base_dn",gw.LdapBaseDn) }
-	if gw.LdapUserAttr != "" { r.Set("ldap_username_attribute",gw.LdapUserAttr) }
-	if gw.HASubnet != "" { r.Set("ha_subnet",gw.HASubnet) }
-	if gw.PeeringHASubnet != "" { r.Set("public_subnet",gw.PeeringHASubnet) }
-	if gw.NewZone != "" { r.Set("zone",gw.NewZone) }
-	if gw.SingleAZ != "" { r.Set("single_az_ha",gw.SingleAZ) }
-//	r.Set("allocate_new_eip",gw.AllocateNewEip)
-	if gw.Eip != "" { r.Set("eip",gw.Eip) }
-	r.Set("public_ip",gw.PublicIP)
-	
-	r.SetType("aviatrix_gateway")
-	
-	err = resourceAviatrixGatewayRead(r,meta)
-	if err != nil {
-	    return nil,fmt.Errorf("[ERROR] Could not import gateway resource: %s",err)
-    }
-	results := make([]*schema.ResourceData, 1,1)
-	results[0] = r
-    return results, nil
-}
-
 func resourceAviatrixGatewayCreate(d *schema.ResourceData, meta interface{}) error {
 	client := meta.(*goaviatrix.Client)
 	gateway := &goaviatrix.Gateway{
@@ -361,11 +291,32 @@ func resourceAviatrixGatewayCreate(d *schema.ResourceData, meta interface{}) err
 		}
 	}
 	d.SetId(gateway.GwName)
+
 	return resourceAviatrixGatewayRead(d, meta)
 }
 
 func resourceAviatrixGatewayRead(d *schema.ResourceData, meta interface{}) error {
 	client := meta.(*goaviatrix.Client)
+	
+	gwname := d.Get("gw_name").(string)
+	// If it is an import only Id is set
+	if gwname == "" {
+		id := d.Id()
+		log.Printf("[DEBUG] Looks like an import, no gateway name received. Import Id is %s",id)
+		if strings.Contains(id,"@") {
+		    substr := strings.Split(id,"@")
+		    account_name := substr[1]
+		    gateway_name := substr[0]
+		    log.Printf("[INFO] Importing %s gateway in %s account",gateway_name,account_name)
+		    d.Set("account_name",account_name)
+		    d.Set("gw_name",gateway_name)
+		    // Terraform must locate a resource declared with the same Id returned
+		    d.SetId(gateway_name)
+		} else {
+			return fmt.Errorf("Id must be in the following format: <gateway name>@<account name>")
+		}
+	} 
+	
 	gateway := &goaviatrix.Gateway{
 		AccountName: d.Get("account_name").(string),
 		GwName:      d.Get("gw_name").(string),
@@ -383,12 +334,70 @@ func resourceAviatrixGatewayRead(d *schema.ResourceData, meta interface{}) error
 	}
 	log.Printf("[TRACE] reading gateway %s: %#v", d.Get("gw_name").(string), gw)
 	if gw != nil {
-		d.Set("vpc_size", gw.GwSize)
+
+		d.Set("cloud_type",gw.CloudType)
+		d.Set("account_name",gw.AccountName)
+		d.Set("gw_name",gw.GwName)
+		d.Set("vpc_id",strings.Split(gw.VpcID,"~~")[0])
+		d.Set("vpc_reg",gw.VpcRegion)
+		if gw.VpcNet != "" { d.Set("vpc_net",gw.VpcNet) }
+		if gw.EnableNat != ""  { d.Set("enable_nat",gw.EnableNat) }
+		if gw.DnsServer != "" { d.Set("dns_server",gw.DnsServer) }
+		if gw.VpnStatus != "" { d.Set("vpn_access",gw.VpnStatus) }
+		if gw.VpnCidr != "" { d.Set("cidr",gw.VpnCidr) }
+		if gw.ElbState == "enabled" {
+		    d.Set("enable_elb","yes")
+		    elb_name := d.Get("elb_name")
+		    // Versions prior to 3.5 won't return elb_name, so deduce it from elb_dns_name
+		    if elb_name == "" {
+		    	elb_dns_name := gw.ElbDNSName
+		    	log.Printf("[INFO] Controllers prior to 4.0 do not return elb_name. Deducing from elb_dns_name")
+		    	if elb_dns_name != "" {
+		    		runes := []rune(elb_dns_name)
+		    		elb_name = string(runes[0:31])
+		    	} else {
+		    		return fmt.Errorf("Neither elb_name or elb_dns_name returned by the API in an ELB enabled gateway")
+		    	}
+		    }
+		    d.Set("elb_name", elb_name)
+		} else {
+		    d.Set("enable_elb","no")
+		}
+		if gw.SplitTunnel != "" { d.Set("split_tunnel",gw.SplitTunnel) }
+		if gw.OtpMode != "" { d.Set("otp_mode",gw.OtpMode) }
+		if gw.SamlEnabled != "" { d.Set("saml_enabled",gw.SamlEnabled) }
+		if gw.OktaToken != "" { d.Set("okta_token",gw.OktaToken) }
+		if gw.OktaURL != "" { d.Set("okta_url",gw.OktaURL) }
+		if gw.OktaUsernameSuffix != "" { d.Set("okta_username_suffix",gw.OktaUsernameSuffix) }
+		if gw.DuoIntegrationKey != "" { d.Set("duo_integration_key",gw.DuoIntegrationKey) }
+		if gw.DuoSecretKey != "" { d.Set("duo_secret_key",gw.DuoSecretKey) }
+		if gw.DuoAPIHostname != "" { d.Set("duo_api_hostname",gw.DuoAPIHostname) }
+		if gw.DuoPushMode != "" { d.Set("duo_push_mode",gw.DuoPushMode) }
+		if gw.EnableLdap != "" { d.Set("enable_ldap",gw.EnableLdap) }
+		if gw.LdapServer != "" { d.Set("ldap_server",gw.LdapServer) }
+		if gw.LdapBindDn!= "" { d.Set("ldap_bind_dn",gw.LdapBindDn) }
+		if gw.LdapPassword != "" { d.Set("ldap_password",gw.LdapPassword) }
+		if gw.LdapBaseDn != "" { d.Set("ldap_base_dn",gw.LdapBaseDn) }
+		if gw.LdapUserAttr != "" { d.Set("ldap_username_attribute",gw.LdapUserAttr) }
+		if gw.HASubnet != "" { d.Set("ha_subnet",gw.HASubnet) }
+		if gw.PeeringHASubnet != "" { d.Set("public_subnet",gw.PeeringHASubnet) }
+		if gw.NewZone != "" { d.Set("zone",gw.NewZone) }
+		if gw.SingleAZ != "" { d.Set("single_az_ha",gw.SingleAZ) }
+	//	d.Set("allocate_new_eip",gw.AllocateNewEip)
+		if gw.Eip != "" { d.Set("eip",gw.Eip) }
+
+        // Though go_aviatrix Gateway struct declares VpcSize as only used on gateway creation
+        // it is the attribute receiving the instance size of an existing gateway instead of
+        // GwSize. (at least in v3.5)
+        if gw.GwSize != "" {
+        	d.Set("vpc_size",gw.GwSize)
+        } else {
+		   if gw.VpcSize != "" { d.Set("vpc_size", gw.VpcSize) }
+        }   
 		d.Set("public_ip", gw.PublicIP)
 		d.Set("cloud_instance_id", gw.CloudnGatewayInstID)
 		d.Set("public_dns_server", gw.PublicDnsServer)
 		d.Set("security_group_id", gw.GwSecurityGroupID)
-		d.Set("elb_name", gw.ElbName)
 
 		if publicSubnet := d.Get("public_subnet").(string); publicSubnet != "" {
 			gateway.GwName += "-hagw"
