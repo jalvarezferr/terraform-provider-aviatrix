@@ -342,13 +342,19 @@ func resourceAviatrixGatewayRead(d *schema.ResourceData, meta interface{}) error
 		if gw.ElbState == "enabled" {
 		    d.Set("enable_elb","yes")
 		    elb_name := d.Get("elb_name")
-		    // Versions prior to 3.5 won't return elb_name, so deduce it from elb_dns_name
+		    // Versions prior to 4.0 won't return elb_name, so deduce it from elb_dns_name
 		    if elb_name == "" {
 		    	elb_dns_name := gw.ElbDNSName
 		    	log.Printf("[INFO] Controllers prior to 4.0 do not return elb_name. Deducing from elb_dns_name")
 		    	if elb_dns_name != "" {
-		    		runes := []rune(elb_dns_name)
-		    		elb_name = string(runes[0:31])
+		    		hostname := strings.Split(elb_dns_name,".")[0]
+		    		// AWS adds - followed by a random string after the name given to the ELB
+		    		parts := strings.Split(hostname,"-")
+		    		// Remove random string added by AWS 
+		    		parts[len(parts)-1] = ""
+		    		parts = parts[:len(parts)-1]
+		    		// Join again using - in case it was used in the ELB Name
+		    		elb_name = strings.Join(parts,"-")
 		    	} else {
 		    		return fmt.Errorf("Neither elb_name or elb_dns_name returned by the API in an ELB enabled gateway")
 		    	}
